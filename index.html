@@ -20,7 +20,7 @@
        //g:TD.gauge({x:220,y:10,width:200,height:200,label:"A Gauge",value:25,min:0,max:100,name:"gauge"}),
        //gr:TD.graph({x:220,y:220,width:400,height:170,label:"A Graph",data:data}),
        vs:TD.value({x:220,y:10,width:460,height:60,label:"Interpolation",value:4,min:0,step:1,max:5, onchange:function(e){resize();}}),
-       t:TD.toggle({x:10,y:190,width:200,height:60,label:"Auto scale",value:1,name:"autoScale", onchange:function(e){autoScale();}}),
+       t:TD.toggle({x:10,y:190,width:200,height:60,label:"No scale",value:0,name:"autoScale", onchange:function(e){autoScale();}}),
        min:TD.value({x:10,y:260,width:200,height:60,label:"Min",value:0.0, name:"min", min:0.0,step:1,max:100.0}),
 	   ave:TD.value({x:10,y:330,width:200,height:60,label:"Avg",value:0.0, name:"ave"}),
 	   max:TD.value({x:10,y:400,width:200,height:60,label:"Max",value:0.0, name:"max", min:0.0,step:1,max:100.0}),
@@ -33,123 +33,112 @@
      };
      for (var i in o) document.body.appendChild(o[i]);
 	 
-	 function autoScale() {
-		// o.log.log(o.t.pressed);
-		// o.log.log(o.vs.getValue());
-		//oneFrame();
-	 }
+     function autoScale() {
+     }
 	 
      /*setInterval(function() {
        TD.update({gauge : 40*Math.sin(Date.now()/1000)+50});
      }, 100);*/
 	 
-	 // When clicked, connect or disconnect
-	var connection;
-	var numberOfInterpolations = 4;
-	var theBitmap = matrix(8, 8, 0.0);
-	var interpolatedBitmap = undefined;
-	var interpolatedSize = undefined;
+     // When clicked, connect or disconnect
+     var connection;
+     var numberOfInterpolations = 4;
+     var theBitmap = matrix(8, 8, 0.0);
+     var interpolatedBitmap = undefined;
+     var interpolatedSize = undefined;
 
-	 function resize() {
-		// Doesn't work properly yet
+     function resize() {
+	// Doesn't work properly yet
+	numberOfInterpolations = o.vs.getValue();
+	interpolatedSize = IMAGE_SIZES[numberOfInterpolations];
+	interpolatedBitmap = matrix(interpolatedSize, interpolatedSize, 0.0);
+	o.ti.resize(numberOfInterpolations, interpolatedBitmap);
+	oneFrame();
+     }
+	
+    // Called when we get a line of data - updates the light color
+    function onLine(v) {
+	if (interpolatedSize===undefined) {
 		numberOfInterpolations = o.vs.getValue();
 		interpolatedSize = IMAGE_SIZES[numberOfInterpolations];
 		interpolatedBitmap = matrix(interpolatedSize, interpolatedSize, 0.0);
-		o.ti.resize(numberOfInterpolations, interpolatedBitmap);
-		oneFrame();
-	 }
-	
-	// Called when we get a line of data - updates the light color
-    function onLine(v) {
-	    //var debugTrace = document.getElementById('debugTrace');
-		//var limitAvg = document.getElementById("limitAvg");
-		//if (debugTrace.checked)
-		//console.log("Received: "+v);
-		if (interpolatedSize===undefined) {
-			numberOfInterpolations = o.vs.getValue();
-			interpolatedSize = IMAGE_SIZES[numberOfInterpolations];
-			interpolatedBitmap = matrix(interpolatedSize, interpolatedSize, 0.0);
-		}
+	}
 
-		//console.log("Interpolated size=" + interpolatedSize);
-		//console.log("Interpolated bitmap=" + interpolatedBitmap);
-		const indexOfFirst = v.indexOf("TH=");
-		if (indexOfFirst >= 0) {
-			var thermal = v.substr(indexOfFirst + 3);
-			raw = parseHexString(thermal);
-			fillRawBitmap(numberOfInterpolations, raw, theBitmap, interpolatedBitmap);
-			var mma = computeAverage(theBitmap);
-			if (!o.t.pressed) {
-				// mma.ave = o.vs.getValue();
-				mma.min = o.min.getValue();
-				mma.max = o.max.getValue();
-			} else {
-				o.min.setValue(mma.min.toFixed(2));
-				o.max.setValue(mma.max.toFixed(2));
-			}
-			o.ave.setValue(mma.ave.toFixed(2));
-			o.ti.setData({min:mma.min, max:mma.max, ave:mma.ave, data:interpolatedBitmap});
+	const indexOfFirst = v.indexOf("TH=");
+	if (indexOfFirst >= 0) {
+		var thermal = v.substr(indexOfFirst + 3);
+		raw = parseHexString(thermal);
+		fillRawBitmap(numberOfInterpolations, raw, theBitmap, interpolatedBitmap);
+		var mma = computeAverage(theBitmap);
+		if (o.t.pressed) {
+			mma.min = o.min.getValue();
+			mma.max = o.max.getValue();
+		} else {
+			o.min.setValue(mma.min.toFixed(2));
+			o.max.setValue(mma.max.toFixed(2));
 		}
+		o.ave.setValue(mma.ave.toFixed(2));
+		o.ti.setData({min:mma.min, max:mma.max, ave:mma.ave, data:interpolatedBitmap});
+	}
     }
 
+    function connect() {
+	if (connection) {
+           connection.close();
+           connection = undefined;
+        }
+       Puck.connect(function(c) {
+	   if (!c) {
+	      alert("Couldn't connect!");
+	      return;
+	   }
+	   connection = c;
+	   // Handle the data we get back, and call 'onLine'
+	   // whenever we get a line
+	   var buf = "";
+	   connection.on("data", function(d) {
+	         buf += d;
+		 var i = buf.indexOf("\n");
+		 while (i>=0) {
+		       onLine(buf.substr(0,i));
+		       buf = buf.substr(i+1);
+		       i = buf.indexOf("\n");
+		  }
+	   });
 
-	function connect() {
-		if (connection) {
-			connection.close();
-			connection = undefined;
-		}
-		Puck.connect(function(c) {
-			if (!c) {
-				alert("Couldn't connect!");
-				return;
-			}
-			connection = c;
-			// Handle the data we get back, and call 'onLine'
-			// whenever we get a line
-			var buf = "";
-			connection.on("data", function(d) {
-				buf += d;
-				var i = buf.indexOf("\n");
-				while (i>=0) {
-					onLine(buf.substr(0,i));
-					buf = buf.substr(i+1);
-					i = buf.indexOf("\n");
-				}
-			});
-		
-			// First, reset Puck.js
-			connection.write("clearInterval();i2c=new I2C();i2c.setup({sda:D21, scl:D22});", function() {;});
-		});
+	   // First, reset Puck.js
+	   connection.write("clearInterval();i2c=new I2C();i2c.setup({sda:D21, scl:D22});", function() {;});
+       });
+    }
+
+    function oneFrame() {
+	// o.log.log("Photo!");
+	if (connection) {
+	   connection.write("clearInterval();print(oosb.pixelArray());\n", function() {;});
+	} else {
+	   connect();
+	   //onLine(rawData);
+	   //alert("Connect first");
 	}
+    }
 
-	function oneFrame() {
-		// o.log.log("Photo!");
-		if (connection) {
-			connection.write("clearInterval();print(oosb.pixelArray());\n", function() {;});
-		} else {
-			connect();
-			//onLine(rawData);
-			//alert("Connect first");
-		}
+    var continuousStop = false;
+
+    function continuousFrame() {
+	// o.log.log("Video!");
+	continuousStop = !continuousStop;
+	if (connection) {
+	   if (!continuousStop)
+	      connection.write("clearInterval();\n", function() {;});
+	   else {
+	      var frameRate = o.frameRate.getValue();
+	      connection.write("clearInterval();setInterval(function(){print(oosb.pixelArray());}," + frameRate + ");\n", function() {;});
+	   }
+	} else {
+	   connect();
+	   //alert("Connect first");
 	}
-
-	var continuousStop = false;
-
-	function continuousFrame() {
-		// o.log.log("Video!");
-		continuousStop = !continuousStop;
-		if (connection) {
-			if (!continuousStop)
-				connection.write("clearInterval();\n", function() {;});
-			else {
-				var frameRate = o.frameRate.getValue();
-				connection.write("clearInterval();setInterval(function(){print(oosb.pixelArray());}," + frameRate + ");\n", function() {;});
-			}
-		} else {
-			connect();
-			//alert("Connect first");
-		}
-	}
+    }
     //TD.startEditor();
    </script>
  </body>
